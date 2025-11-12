@@ -1627,7 +1627,7 @@ export default function App() {
          {isAuthReady && userId && (
             <div className="text-xs text-gray-400 max-w-xl mx-auto">
               <p className="mt-1">Your User ID: {userId}</p>
-              {userId === ADMIN_USER_ID && <p className="font-bold text-purple-600">Admin Access Granted</p>}
+              {isAdmin && <p className="font-bold text-purple-600">Admin Access Granted</p>}
             </div>
          )}
       </footer>
