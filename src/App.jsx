@@ -51,11 +51,25 @@ const ADMIN_USER_ID = "REPLACE_THIS_WITH_YOUR_USER_ID"; // Remember to replace t
 
 // --- Firebase Configuration ---
 // This is provided by the environment you are in.
-const firebaseConfig = JSON.parse(
-  typeof __firebase_config !== 'undefined'
-    ? __firebase_config
-    : '{}'
-);
+// Your web app's Firebase configuration
+
+const firebaseConfig = {
+
+  apiKey: "AIzaSyC4F87md0cSuUVhTzhnPMUtvlqb0273ckE",
+
+  authDomain: "climb-ccny-app.firebaseapp.com",
+
+  projectId: "climb-ccny-app",
+
+  storageBucket: "climb-ccny-app.firebasestorage.app",
+
+  messagingSenderId: "819152854217",
+
+  appId: "1:819152854217:web:2d0dd98c9c35086ba70118"
+
+};
+
+
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // Initialize Firebase
