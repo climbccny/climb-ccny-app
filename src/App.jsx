@@ -1786,8 +1786,8 @@ export default function App() {
     return () => unsubscribe();
   }, [isAuthReady, userId, page]);
 
-  // Temporarily grant admin access for testing
-  const isAdmin = true;
+  // Admin access gated by env-configured user IDs
+  const isAdmin = ADMIN_USER_IDS.includes(userId ?? '');
 
   // ROUTER: Check if we should show the public roster page
   if (page === 'roster' && sessionId) {
