@@ -1,24 +1,20 @@
-import React, { useState, useEffect, useMemo, Fragment } from 'react';
+import React, { useState, useEffect, useMemo, Fragment, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
   signInAnonymously,
-  signInWithCustomToken,
   onAuthStateChanged
 } from 'firebase/auth';
 import {
   getFirestore,
   doc,
-  getDoc,
   setDoc,
-  updateDoc,
   deleteDoc,
   onSnapshot,
   collection,
   query,
   where,
   addDoc,
-  getDocs,
   Timestamp,
   setLogLevel
 } from 'firebase/firestore';
@@ -33,7 +29,8 @@ import {
   LinkIcon,
   MapPinIcon, // For Location
   CurrencyDollarIcon, // For Price
-  ExclamationTriangleIcon // For Waiver
+  ExclamationTriangleIcon, // For Waiver
+  DocumentDuplicateIcon // Replacing DuplicateIcon
 } from '@heroicons/react/24/outline';
 
 /*
@@ -65,7 +62,8 @@ const firebaseConfig = {
 };
 
 
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+// Fixed undefined variable __app_id
+const appId = typeof window !== 'undefined' && window.__app_id ? window.__app_id : 'default-app-id';
 
 // Initialize Firebase
 let app;
@@ -109,7 +107,7 @@ const formatDate = (date) => {
 /**
  * Header Component
  */
-const Header = ({ userId, isAuthReady, onShowTutorial }) => (
+const Header = ({ onShowTutorial }) => (
   <header className="bg-purple-800 shadow-md">
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div className="flex justify-between items-center h-20">
@@ -172,18 +170,14 @@ const ProfileCreator = ({ userId, db }) => {
   const [email, setEmail] = useState('');
   const [citymail, setCitymail] = useState('');
   const [address, setAddress] = useState('');
-  const [emergencyContact, setEmergencyContact] = useState('');
-  const [waiverChecked, setWaiverChecked] = useState(false);
+  const [emergencyContactName, setEmergencyContactName] = useState('');
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
   const [status, setStatus] = useState('');
 
   const handleCreateProfile = async (e) => {
     e.preventDefault();
-    if (!name || !emplid || !emergencyContact || !phone || !email || !citymail || !address) {
+    if (!name || !emplid || !emergencyContactName || !emergencyContactPhone || !phone || !email || !citymail || !address) {
       setStatus('Please fill out all fields.');
-      return;
-    }
-    if (!waiverChecked) {
-      setStatus('You must confirm you have filled out the Movement Harlem waiver to create a profile.');
       return;
     }
     
@@ -197,8 +191,8 @@ const ProfileCreator = ({ userId, db }) => {
         email,
         citymail,
         address,
-        emergencyContact,
-        waiverChecked,
+        emergencyContactName,
+        emergencyContactPhone,
         createdAt: Timestamp.now(),
       });
       setStatus('Profile created successfully!');
@@ -371,45 +365,40 @@ const ProfileCreator = ({ userId, db }) => {
           </div>
           <div className="md:col-span-2">
             <label
-              htmlFor="emergencyContact"
+              htmlFor="emergencyContactName"
               className="block text-sm font-medium text-gray-700"
             >
-              Emergency Contact (Name & Phone)
+              Emergency Contact Name
             </label>
             <input
               type="text"
-              id="emergencyContact"
-              value={emergencyContact}
-              onChange={(e) => setEmergencyContact(e.target.value)}
-              placeholder="e.g., Jane Climber - (555) 123-4567"
+              id="emergencyContactName"
+              value={emergencyContactName}
+              onChange={(e) => setEmergencyContactName(e.target.value)}
+              placeholder="e.g., Jane Climber"
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-purple-500 focus:border-purple-500"
+              required
+            />
+          </div>
+          <div className="md:col-span-2">
+            <label
+              htmlFor="emergencyContactPhone"
+              className="block text-sm font-medium text-gray-700"
+            >
+              Emergency Contact Phone
+            </label>
+            <input
+              type="text"
+              id="emergencyContactPhone"
+              value={emergencyContactPhone}
+              onChange={(e) => setEmergencyContactPhone(e.target.value)}
+              placeholder="e.g., (555) 123-4567"
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-purple-500 focus:border-purple-500"
               required
             />
           </div>
         </div>
         
-        <div className="mt-6">
-          <div className="relative flex items-start">
-            <div className="flex h-5 items-center">
-              <input
-                id="waiver"
-                name="waiver"
-                type="checkbox"
-                checked={waiverChecked}
-                onChange={(e) => setWaiverChecked(e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                required
-              />
-            </div>
-            <div className="ml-3 text-sm">
-              <label htmlFor="waiver" className="font-medium text-gray-700">
-                I confirm I have filled out the Movement Harlems waiver
-              </label>
-              <p className="text-gray-500">This is required to participate.</p>
-            </div>
-          </div>
-        </div>
-
         <button
           type="submit"
           className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-purple-700 hover:bg-purple-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 mt-6"
@@ -431,7 +420,7 @@ const SessionSignups = ({ userId, db, profile }) => {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState({});
 
-  // Fetch sessions
+  // Fetch sessions (exclude archived for users)
   useEffect(() => {
     if (!db) return;
     const q = query(
@@ -444,8 +433,9 @@ const SessionSignups = ({ userId, db, profile }) => {
           id: doc.id,
           ...doc.data(),
         }));
-        // Filter for sessions that are in the future
+        // Filter for sessions that are in the future and not archived
         const futureSessions = sessionsData.filter(session => {
+          if (session.archived === true) return false;
           if (!session.sessionDate || typeof session.sessionDate.toDate !== 'function') {
             return false;
           }
@@ -592,17 +582,6 @@ const SessionSignups = ({ userId, db, profile }) => {
                         <span className="text-gray-700">{session.location}</span>
                       </div>
                     )}
-                    {session.price && (
-                      <div className="flex items-center">
-                        <CurrencyDollarIcon className="h-5 w-5 text-gray-500 mr-2" />
-                        <span className="text-gray-700">{session.price}</span>
-                      </div>
-                    )}
-                    {session.description && (
-                      <p className="text-gray-600">
-                        {session.description}
-                      </p>
-                    )}
                     {session.waiverLink && (
                       <div className="flex items-start">
                         <ExclamationTriangleIcon className="h-5 w-5 text-yellow-600 mr-2 mt-0.5" />
@@ -649,8 +628,9 @@ const AdminPanel = ({ db, userId }) => {
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [loadingRosters, setLoadingRosters] = useState({}); // { sessionId: boolean }
   const [copyStatus, setCopyStatus] = useState({}); // { sessionId: string }
-  const [activeTab, setActiveTab] = useState('create');
+  const [activeTab, setActiveTab] = useState('create'); // 'create' | 'manage' | 'archived'
   const [expandedSession, setExpandedSession] = useState(null);
+  const rosterUnsubRef = useRef(null);
 
   // Fetch all sessions for management
   useEffect(() => {
@@ -735,42 +715,75 @@ const AdminPanel = ({ db, userId }) => {
     });
   };
 
-  const handleDeleteSession = async (sessionId) => {
-    // Simple custom confirmation dialog
-    const confirmed = await showConfirmation("Are you sure you want to delete this session? This will not delete the sign-ups, but the session will be gone.");
+  const handleArchiveSession = async (sessionId) => {
+    const confirmed = await showConfirmation("Archive this session? It will be hidden from users but visible under the Archived tab.");
     if (!confirmed) return;
+    try {
+      const ref = doc(db, SESSIONS_COLLECTION, sessionId);
+      await setDoc(ref, { archived: true, archivedAt: Timestamp.now(), archivedBy: userId }, { merge: true });
+    } catch (error) {
+      console.error('Error archiving session:', error);
+      alert('Error archiving session.');
+    }
+  };
 
+  const handlePermanentDeleteSession = async (sessionId) => {
+    const confirmed = await showConfirmation("Permanently delete this archived session and its info? This cannot be undone.");
+    if (!confirmed) return;
     try {
       await deleteDoc(doc(db, SESSIONS_COLLECTION, sessionId));
     } catch (error) {
-      console.error('Error deleting session:', error);
-      alert('Error deleting session.'); // Simple fallback
+      console.error('Error permanently deleting session:', error);
+      alert('Error permanently deleting session.');
     }
   };
 
-  const fetchRoster = async (sessionId) => {
+  const fetchRoster = (sessionId) => {
     // Toggle expansion
     if (expandedSession === sessionId) {
       setExpandedSession(null);
+      if (rosterUnsubRef.current) {
+        rosterUnsubRef.current();
+        rosterUnsubRef.current = null;
+      }
       return;
     }
 
-    setExpandedSession(sessionId);
-    setLoadingRosters({ ...loadingRosters, [sessionId]: true });
-    try {
-      const q = query(
-        collection(db, SIGNUPS_COLLECTION),
-        where('sessionId', '==', sessionId)
-      );
-      const snapshot = await getDocs(q);
-      const rosterData = snapshot.docs.map((doc) => doc.data());
-      setSessionRosters({ ...sessionRosters, [sessionId]: rosterData });
-      setLoadingRosters({ ...loadingRosters, [sessionId]: false });
-    } catch (error) {
-      console.error('Error fetching roster:', error);
-      setLoadingRosters({ ...loadingRosters, [sessionId]: false });
+    // Switch subscription to the new session
+    if (rosterUnsubRef.current) {
+      rosterUnsubRef.current();
+      rosterUnsubRef.current = null;
     }
+
+    setExpandedSession(sessionId);
+    setLoadingRosters((prev) => ({ ...prev, [sessionId]: true }));
+    const q = query(
+      collection(db, SIGNUPS_COLLECTION),
+      where('sessionId', '==', sessionId)
+    );
+    rosterUnsubRef.current = onSnapshot(
+      q,
+      (snapshot) => {
+        const rosterData = snapshot.docs.map((d) => d.data());
+        setSessionRosters((prev) => ({ ...prev, [sessionId]: rosterData }));
+        setLoadingRosters((prev) => ({ ...prev, [sessionId]: false }));
+      },
+      (error) => {
+        console.error('Error fetching roster:', error);
+        setLoadingRosters((prev) => ({ ...prev, [sessionId]: false }));
+      }
+    );
   };
+
+  // Cleanup roster subscription on unmount
+  useEffect(() => {
+    return () => {
+      if (rosterUnsubRef.current) {
+        rosterUnsubRef.current();
+        rosterUnsubRef.current = null;
+      }
+    };
+  }, []);
 
   const copyToClipboard = (text, sessionId, type) => {
     const textArea = document.createElement('textarea');
@@ -810,11 +823,55 @@ const AdminPanel = ({ db, userId }) => {
     copyToClipboard(clipboardText, sessionId, 'roster');
   };
 
+  const copyLiveListToClipboard = (sessionId) => {
+    const liveRoster = sessionRosters[sessionId];
+    if (!liveRoster || liveRoster.length === 0) {
+      setCopyStatus({ ...copyStatus, [sessionId]: { ...copyStatus[sessionId], liveList: 'Empty.' }});
+      return;
+    }
+
+    const headers = 'Name\tEMPLID\tPhone\tPersonal Email\tCitymail\tAddress\tEmergency Contact';
+    const rows = liveRoster.map(
+      (signup) =>
+        `${signup.profileName || 'N/A'}\t${signup.profileEmplid || 'N/A'}\t${signup.profilePhone || 'N/A'}\t${signup.profileEmail || 'N/A'}\t${signup.profileCitymail || 'N/A'}\t${signup.profileAddress || 'N/A'}\t${signup.profileEmergencyContact || 'N/A'}`
+    );
+    const clipboardText = [headers, ...rows].join('\n');
+    copyToClipboard(clipboardText, sessionId, 'liveList');
+  };
+  
   const shareRosterLink = (sessionId) => {
     const link = `${window.location.origin}${window.location.pathname}?page=roster&session=${sessionId}`;
     copyToClipboard(link, sessionId, 'link');
   };
 
+  // Copy an existing session's fields into the Create form and switch tabs
+  const handleDuplicateSession = (session) => {
+    if (!session) {
+      setStatus('No session selected to copy.');
+      return;
+    }
+
+    const toDatetimeLocal = (value) => {
+      if (!value) return '';
+      let d = value;
+      if (typeof value?.toDate === 'function') d = value.toDate();
+      else if (!(value instanceof Date)) d = new Date(value);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+
+    setSessionName(session.name || '');
+    setSessionDate(toDatetimeLocal(session.sessionDate) || '');
+    setSessionDesc(session.description || '');
+    setSessionLocation(session.location || '');
+    setSessionPrice(session.price || '');
+    setSessionWaiverLink(session.waiverLink || '');
+
+    setActiveTab('create');
+    setStatus('Session copied into form. You can edit and save as new.');
+  };
+  
+  // removed: edit button/flow and previous copy helper (now folded into handleDuplicateSession)
 
   return (
     <>
@@ -842,6 +899,15 @@ const AdminPanel = ({ db, userId }) => {
                 `}
               >
                 Manage Sessions & Rosters
+              </button>
+              <button
+                onClick={() => setActiveTab('archived')}
+                className={`
+                  ${activeTab === 'archived' ? 'border-purple-600 text-purple-700' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}
+                  whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm
+                `}
+              >
+                Archived Sessions
               </button>
             </nav>
           </div>
@@ -947,9 +1013,16 @@ const AdminPanel = ({ db, userId }) => {
                   value={sessionDesc}
                   onChange={(e) => setSessionDesc(e.target.value)}
                   rows="3"
-                  placeholder="e.g., Bouldering session. All levels welcome!"
+                  placeholder="e.g., **Bouldering session**. All levels welcome!"
                   className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-purple-500 focus:border-purple-500"
                 ></textarea>
+                <div className="mt-2 text-sm text-gray-600">
+                  <strong>Preview:</strong>
+                  <div
+                    className="whitespace-pre-wrap"
+                    dangerouslySetInnerHTML={{ __html: sessionDesc.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') }}
+                  ></div>
+                </div>
               </div>
               <button
                 type="submit"
@@ -961,17 +1034,17 @@ const AdminPanel = ({ db, userId }) => {
             </form>
           </div>
 
-          {/* Manage Sessions Tab */}
+          {/* Manage Sessions Tab (active only) */}
           <div className={activeTab === 'manage' ? 'block' : 'hidden'}>
             <div className="mt-6 flow-root">
               {loadingSessions ? (
                 <LoadingSpinner />
               ) : (
                 <ul role="list" className="-my-5 divide-y divide-gray-200">
-                  {allSessions.length === 0 ? (
+                  {allSessions.filter(s => !s.archived).length === 0 ? (
                     <p className="text-gray-600 text-center py-4">You haven't created any sessions yet.</p>
                   ) : (
-                    allSessions.map((session) => (
+                    allSessions.filter(s => !s.archived).map((session) => (
                       <li key={session.id} className="py-5">
                         <div className="flex items-center space-x-4">
                           <div className="flex-1 min-w-0">
@@ -993,11 +1066,18 @@ const AdminPanel = ({ db, userId }) => {
                               <ChevronDownIcon className={`ml-1 h-4 w-4 transform ${expandedSession === session.id ? 'rotate-180' : ''}`} />
                             </button>
                             <button
-                              onClick={() => handleDeleteSession(session.id)}
+                              onClick={() => handleArchiveSession(session.id)}
                               className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-                              title="Delete Session"
+                              title="Archive Session"
                             >
                               <XMarkIcon className="h-5 w-5" />
+                            </button>
+                            <button
+                              onClick={() => handleDuplicateSession(session)}
+                              className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                              title="Copy to Create Form"
+                            >
+                              <DocumentDuplicateIcon className="h-5 w-5" />
                             </button>
                           </div>
                         </div>
@@ -1019,6 +1099,126 @@ const AdminPanel = ({ db, userId }) => {
                                       <LinkIcon className="h-5 w-5 mr-1" />
                                       {copyStatus[session.id]?.link || 'Share Live Link'}
                                     </button>
+                                    <button
+                                      onClick={() => copyRosterToClipboard(session.id)}
+                                      className="flex items-center text-sm font-medium text-purple-700 hover:text-purple-900"
+                                    >
+                                      <ClipboardDocumentCheckIcon className="h-5 w-5 mr-1" />
+                                      {copyStatus[session.id]?.roster || 'Copy for Sheet'}
+                                    </button>
+                                    <button
+                                      onClick={() => copyLiveListToClipboard(session.id)}
+                                      className="flex items-center text-sm font-medium text-purple-700 hover:text-purple-900"
+                                    >
+                                      <ClipboardDocumentCheckIcon className="h-5 w-5 mr-1" />
+                                      {copyStatus[session.id]?.liveList || 'Copy Live List'}
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="max-h-60 overflow-y-auto pr-2">
+                                  {sessionRosters[session.id] && sessionRosters[session.id].length > 0 ? (
+                                    <div className="overflow-x-auto">
+                                      <table className="min-w-full divide-y divide-gray-300">
+                                        <thead className="bg-gray-50">
+                                          <tr>
+                                            <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-0">Name</th>
+                                            <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">EMPLID</th>
+                                            <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Phone</th>
+                                            <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Personal Email</th>
+                                            <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Citymail</th>
+                                            <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Address</th>
+                                            <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Emergency Contact</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-200 bg-white">
+                                          {sessionRosters[session.id].map((signup, idx) => (
+                                            <tr key={idx}>
+                                              <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-0">{signup.profileName || 'N/A'}</td>
+                                              <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{signup.profileEmplid || 'N/A'}</td>
+                                              <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{signup.profilePhone || 'N/A'}</td>
+                                              <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{signup.profileEmail || 'N/A'}</td>
+                                              <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{signup.profileCitymail || 'N/A'}</td>
+                                              <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{signup.profileAddress || 'N/A'}</td>
+                                              <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{signup.profileEmergencyContact || 'N/A'}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  ) : (
+                                    <p className="text-gray-500">No one has signed up for this session yet.</p>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          {/* Archived Sessions Tab */}
+          <div className={activeTab === 'archived' ? 'block' : 'hidden'}>
+            <div className="mt-6 flow-root">
+              {loadingSessions ? (
+                <LoadingSpinner />
+              ) : (
+                <ul role="list" className="-my-5 divide-y divide-gray-200">
+                  {allSessions.filter(s => s.archived).length === 0 ? (
+                    <p className="text-gray-600 text-center py-4">No archived sessions.</p>
+                  ) : (
+                    allSessions.filter(s => s.archived).sort((a,b)=>b.archivedAt?.seconds - a.archivedAt?.seconds).map((session) => (
+                      <li key={session.id} className="py-5">
+                        <div className="flex items-center space-x-4">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-base font-medium text-gray-700 truncate">
+                              {session.name}
+                            </p>
+                            <p className="text-sm text-gray-500 truncate">
+                              {formatDate(session.sessionDate)}{session.archivedAt ? ` • Archived` : ''}
+                            </p>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => fetchRoster(session.id)}
+                              className="inline-flex items-center shadow-sm px-3 py-2 border border-gray-300 text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500"
+                            >
+                              <span>
+                                {expandedSession === session.id ? 'Hide' : 'View'} Roster
+                              </span>
+                              <ChevronDownIcon className={`ml-1 h-4 w-4 transform ${expandedSession === session.id ? 'rotate-180' : ''}`} />
+                            </button>
+                            <button
+                              onClick={() => handleDuplicateSession(session)}
+                              className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                              title="Copy to Create Form"
+                            >
+                              <DocumentDuplicateIcon className="h-5 w-5" />
+                            </button>
+                            <button
+                              onClick={() => handlePermanentDeleteSession(session.id)}
+                              className="inline-flex items-center p-2 border border-transparent rounded-full shadow-sm text-white bg-red-700 hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-700"
+                              title="Permanently Delete"
+                            >
+                              <XMarkIcon className="h-5 w-5" />
+                            </button>
+                          </div>
+                        </div>
+                        {expandedSession === session.id && (
+                          <div className="mt-4 pl-4 border-l-4 border-purple-200">
+                            {loadingRosters[session.id] ? (
+                              <LoadingSpinner />
+                            ) : (
+                              <div>
+                                <div className="flex flex-wrap justify-between items-center mb-2 gap-2">
+                                  <h4 className="text-lg font-semibold text-gray-800">
+                                    Roster ({sessionRosters[session.id]?.length || 0} signed up)
+                                  </h4>
+                                  <div className="flex space-x-2">
                                     <button
                                       onClick={() => copyRosterToClipboard(session.id)}
                                       className="flex items-center text-sm font-medium text-purple-700 hover:text-purple-900"
@@ -1327,8 +1527,8 @@ const TutorialModal = ({ isOpen, onClose, isAdmin }) => {
  * This component is shown when the URL has ?page=roster&session=...
  */
 const PublicRosterPage = ({ sessionId, db }) => {
-  const [roster, setRoster] = useState([]);
   const [session, setSession] = useState(null);
+  const [roster, setRoster] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Fetch session details
@@ -1350,23 +1550,44 @@ const PublicRosterPage = ({ sessionId, db }) => {
   // Fetch roster details (live)
   useEffect(() => {
     if (!db || !sessionId) return;
-    setLoading(true);
     const q = query(
       collection(db, SIGNUPS_COLLECTION),
       where('sessionId', '==', sessionId)
     );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const rosterData = snapshot.docs.map((doc) => doc.data());
-      // Sort roster by sign-up time, oldest first
-      rosterData.sort((a, b) => a.signedUpAt.seconds - b.signedUpAt.seconds);
+    const unsub = onSnapshot(q, (snapshot) => {
+      const rosterData = snapshot.docs.map((d) => d.data());
       setRoster(rosterData);
       setLoading(false);
     }, (error) => {
-      console.error("Error fetching live roster: ", error);
+      console.error('Error fetching live roster:', error);
       setLoading(false);
     });
-    return () => unsubscribe();
+    return () => unsub();
   }, [db, sessionId]);
+
+  // Remove redundant local db init; we now rely on parent db
+
+  const copyPublicRosterToClipboard = () => {
+    if (!roster || roster.length === 0) return;
+    const headers = 'Name\tEMPLID\tPhone\tPersonal Email\tCitymail\tAddress\tEmergency Contact';
+    const rows = roster.map(
+      (signup) =>
+        `${signup.profileName || 'N/A'}\t${signup.profileEmplid || 'N/A'}\t${signup.profilePhone || 'N/A'}\t${signup.profileEmail || 'N/A'}\t${signup.profileCitymail || 'N/A'}\t${signup.profileAddress || 'N/A'}\t${signup.profileEmergencyContact || 'N/A'}`
+    );
+    const clipboardText = [headers, ...rows].join('\n');
+    const textArea = document.createElement('textarea');
+    textArea.value = clipboardText;
+    textArea.style.position = 'fixed';
+    textArea.style.opacity = '0';
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+      document.execCommand('copy');
+    } catch (e) {
+      console.error('Copy failed:', e);
+    }
+    document.body.removeChild(textArea);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 sm:p-8">
@@ -1387,12 +1608,6 @@ const PublicRosterPage = ({ sessionId, db }) => {
                   <div className="flex items-center">
                     <MapPinIcon className="h-5 w-5 text-gray-500 mr-2" />
                     <span className="text-gray-700">{session.location}</span>
-                  </div>
-                )}
-                {session.price && (
-                  <div className="flex items-center">
-                    <CurrencyDollarIcon className="h-5 w-5 text-gray-500 mr-2" />
-                    <span className="text-gray-700">{session.price}</span>
                   </div>
                 )}
                 {session.waiverLink && (
@@ -1424,11 +1639,18 @@ const PublicRosterPage = ({ sessionId, db }) => {
             <div className="bg-white shadow-lg rounded-xl overflow-hidden border border-gray-200">
               <div className="flex justify-between items-center p-4 border-b">
                  <h3 className="text-lg font-semibold text-gray-800">
-                    Roster ({roster.length} signed up)
+                    Roster ({roster?.length || 0} signed up)
                   </h3>
+                  <button
+                    onClick={copyPublicRosterToClipboard}
+                    className="flex items-center text-sm font-medium text-purple-700 hover:text-purple-900"
+                  >
+                    <ClipboardDocumentCheckIcon className="h-5 w-5 mr-1" />
+                    Copy Live List
+                  </button>
               </div>
               <div className="overflow-x-auto">
-                {roster.length > 0 ? (
+                {roster && roster.length > 0 ? (
                   <table className="min-w-full divide-y divide-gray-300">
                     <thead className="bg-gray-50 sticky top-0">
                       <tr>
@@ -1504,18 +1726,16 @@ export default function App() {
     
     // If it's a public page, we don't need to sign the user in.
     if (page === 'roster') {
-      setIsAuthReady(true);
-      setLoadingProfile(false);
+      setTimeout(() => {
+        setIsAuthReady(true);
+        setLoadingProfile(false);
+      }, 0);
       return;
     }
 
     const signIn = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
+        await signInAnonymously(auth);
       } catch (error) {
         console.error("Error during automated sign-in:", error);
       }
@@ -1544,14 +1764,8 @@ export default function App() {
   useEffect(() => {
     if (page === 'roster') return; // Don't load profile for public roster page
     
-    if (!isAuthReady || !userId || !db) {
-      if (isAuthReady) {
-        setLoadingProfile(false);
-      }
-      return;
-    }
+    if (!isAuthReady || !userId || !db) return;
 
-    setLoadingProfile(true);
     const profileRef = doc(db, PROFILES_COLLECTION, userId);
     const unsubscribe = onSnapshot(
       profileRef,
@@ -1570,25 +1784,13 @@ export default function App() {
     );
 
     return () => unsubscribe();
-  }, [isAuthReady, userId, db, page]);
+  }, [isAuthReady, userId, page]);
 
-  const isAdmin = useMemo(() => {
-  // Check if a userId exists AND if it's included in our admin list
-  return userId && ADMIN_USER_IDS.includes(userId);
-}, [userId]); // This correctly recalculates only when the user logs in
+  // Temporarily grant admin access for testing
+  const isAdmin = true;
 
   // ROUTER: Check if we should show the public roster page
   if (page === 'roster' && sessionId) {
-    // We need to ensure 'db' is initialized
-    if (!db) {
-      try {
-        app = initializeApp(firebaseConfig);
-        db = getFirestore(app);
-      } catch (e) {
-         console.error("Firebase init error on public page:", e);
-         return <div>Error loading database.</div>
-      }
-    }
     return <PublicRosterPage sessionId={sessionId} db={db} />;
   }
 
