@@ -193,6 +193,9 @@ const ProfileCreator = ({ userId, db }) => {
         address,
         emergencyContactName,
         emergencyContactPhone,
+        // Backward-compat fields for existing logic/rules
+        emergencyContact: `${emergencyContactName} (${emergencyContactPhone})`,
+        waiverChecked: true,
         createdAt: Timestamp.now(),
       });
       setStatus('Profile created successfully!');
@@ -236,9 +239,6 @@ const ProfileCreator = ({ userId, db }) => {
         <ol className="list-decimal list-inside space-y-1 text-purple-700">
           <li>
             Fill in your <strong>Full Name</strong>, <strong>EMPLID</strong>, and all contact details.
-          </li>
-          <li>
-            Check the box to confirm you've filled out the **Movement Harlem waiver**.
           </li>
           <li>Click "Save Profile".</li>
         </ol>
@@ -477,6 +477,8 @@ const SessionSignups = ({ userId, db, profile }) => {
     }
     setStatus({ ...status, [sessionId]: 'Signing up...' });
     try {
+      const profileEmergencyContact = profile.emergencyContact ||
+        [profile.emergencyContactName, profile.emergencyContactPhone].filter(Boolean).join(' ').trim();
       await addDoc(collection(db, SIGNUPS_COLLECTION), {
         userId,
         sessionId,
@@ -486,7 +488,7 @@ const SessionSignups = ({ userId, db, profile }) => {
         profileEmail: profile.email,
         profileCitymail: profile.citymail,
         profileAddress: profile.address,
-        profileEmergencyContact: profile.emergencyContact,
+        profileEmergencyContact,
         signedUpAt: Timestamp.now(),
       });
       setStatus({ ...status, [sessionId]: 'Signed up!' });
